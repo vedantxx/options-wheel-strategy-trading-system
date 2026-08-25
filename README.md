@@ -15,6 +15,19 @@ The app reads `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, and `ALPACA_PAPER` from `.e
 
 To permit live-account order submission, both `ALPACA_PAPER=false` and `ALLOW_LIVE_ORDERS=true` are required. Every order also requires an in-app confirmation.
 
+## Deploy with Vercel
+
+Connect this Git repository to a new Vercel project. Vercel detects the Flask `app` exported by `app.py`; `vercel.json` configures the Python function and keeps desktop/reference files out of the deployment bundle.
+
+Add these environment variables in **Vercel → Project Settings → Environment Variables**:
+
+- `ALPACA_API_KEY`
+- `ALPACA_SECRET_KEY`
+- `ALPACA_PAPER=true`
+- `ALLOW_DEMO_FALLBACK=false` (recommended for production)
+
+Do not add `PORT`, `HOST`, or `FLASK_DEBUG` in Vercel. Git pushes to the connected production branch will deploy automatically, and pull requests will receive preview deployments.
+
 ## Main flows
 
 - Six-card global portfolio overview
