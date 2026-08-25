@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Wheel Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body data-paper="{{ 'true' if paper else 'false' }}">
+  <header class="header">
+    <div class="brand">
+      <div class="brand-mark"><span></span><span></span><span></span></div>
+      <div><h1>Wheel <em>Command Center</em></h1><p>Portfolio control, contract selection &amp; scenario intelligence</p></div>
+    </div>
+    <div class="header-actions">
+      <span class="market-pill" id="marketPill"><i></i><span id="marketStatus">Checking market</span></span>
+      <span class="env-pill">{{ 'PAPER' if paper else 'LIVE' }}</span>
+      <button class="icon-btn" id="refreshBtn" aria-label="Refresh dashboard" title="Refresh dashboard">↻</button>
+    </div>
+  </header>
+
+  <section class="control-bar">
+    <div class="control-group">
+      <label for="symbolSelect">Stock</label>
+      <select id="symbolSelect"><option>Loading…</option></select>
+    </div>
+    <div class="control-group maturity-group">
+      <label for="maturitySelect">Maturity</label>
+      <select id="maturitySelect"><option>Loading…</option></select>
+    </div>
+    <div class="divider"></div>
+    <button class="action-btn neutral" id="generateBtn"><span>⌁</span> Generate maturities</button>
+    <button class="action-btn call" id="sellCallBtn" disabled><span>↗</span> Sell call @ mid</button>
+    <button class="action-btn put" id="sellPutBtn" disabled><span>↘</span> Sell put @ mid</button>
+    <button class="action-btn close" id="closeCallBtn" disabled>Close call</button>
+    <button class="action-btn close" id="closePutBtn" disabled>Close put</button>
+    <div class="control-spacer"></div>
+    <div class="selection-note" id="selectionNote">Select an option row to prepare a trade</div>
+  </section>
+
+  <div class="mode-banner hidden" id="modeBanner"></div>
+  <main class="main-layout">
+    <section class="content">
+      <div class="section-heading"><div><span class="eyebrow">GLOBAL PORTFOLIO</span><h2>Account overview</h2></div><span class="timestamp" id="updatedAt">—</span></div>
+      <div class="kpi-grid" id="kpiGrid">
+        <article class="kpi skeleton"></article><article class="kpi skeleton"></article><article class="kpi skeleton"></article>
+        <article class="kpi skeleton"></article><article class="kpi skeleton"></article><article class="kpi skeleton"></article>
+      </div>
+
+      <div class="charts-grid">
+        <article class="panel chart-panel">
+          <div class="panel-head"><div><span class="eyebrow">SELECTED WHEEL</span><h3 id="wheelChartTitle">Position structure</h3></div><span class="legend-inline"><i class="cost-dot"></i> Cost basis <i class="call-dot"></i> Call <i class="put-dot"></i> Put</span></div>
+          <div class="chart-wrap"><canvas id="wheelChart"></canvas></div>
+        </article>
+        <article class="panel chart-panel">
+          <div class="panel-head"><div><span class="eyebrow">ACCOUNT</span><h3>Equity curve</h3></div><span class="period-pill">1M · Daily</span></div>
+          <div class="chart-wrap"><canvas id="equityChart"></canvas></div>
+        </article>
+      </div>
+
+      <div class="chains-grid">
+        <article class="panel chain-panel call-panel">
+          <div class="panel-head"><div><span class="eyebrow green">COVERED CALLS</span><h3>OTM call chain</h3></div><span class="chain-count" id="callCount">0 contracts</span></div>
+          <p class="chain-hint">5-point OTM anchor · 2.50 steps · closest exchange strikes</p>
+          <div class="table-scroll"><table class="chain-table"><thead><tr><th>Strike</th><th>Bid</th><th>Ask</th><th>Mid</th><th>Delta</th><th>IV</th></tr></thead><tbody id="callsBody"><tr><td colspan="6" class="empty-cell">Choose a stock and maturity</td></tr></tbody></table></div>
+        </article>
+        <article class="panel chain-panel put-panel">
+          <div class="panel-head"><div><span class="eyebrow red">CASH-SECURED PUTS</span><h3>OTM put chain</h3></div><span class="chain-count" id="putCount">0 contracts</span></div>
+          <p class="chain-hint">5-point OTM anchor · 2.50 steps · closest exchange strikes</p>
+          <div class="table-scroll"><table class="chain-table"><thead><tr><th>Strike</th><th>Bid</th><th>Ask</th><th>Mid</th><th>Delta</th><th>IV</th></tr></thead><tbody id="putsBody"><tr><td colspan="6" class="empty-cell">Choose a stock and maturity</td></tr></tbody></table></div>
+        </article>
+      </div>
+
+      <article class="panel table-panel recent-trades-panel">
+        <div class="panel-head"><div><span class="eyebrow">ACTIVITY</span><h3>Recent trades</h3></div><div class="search-box">⌕ <input id="tradeSearch" placeholder="Search trades"></div></div>
+        <div class="table-scroll"><table><thead><tr><th>Time</th><th>Underlying</th><th>Contract / strategy</th><th>Side</th><th>Qty</th><th>Fill / limit</th><th>Status</th></tr></thead><tbody id="tradesBody"><tr><td colspan="7" class="empty-cell">Loading trades…</td></tr></tbody></table></div>
+      </article>
+    </section>
+
+    <aside class="sidebar">
+      <div class="sidebar-head"><span class="eyebrow">SCENARIO ANALYSIS</span><h2 id="scenarioSymbol">— Wheel</h2><p>Assignment, premium and basis outcomes</p></div>
+      <div class="position-card">
+        <div><span>Shares</span><strong id="positionShares">—</strong></div><div><span>Avg cost</span><strong id="positionCost">—</strong></div><div><span>Current</span><strong id="positionSpot">—</strong></div>
+      </div>
+      <div class="scenario-section">
+        <h4>Current position</h4>
+        <div class="scenario-metric hero"><span>Unrealized P/L from cost basis</span><strong id="stockPl">—</strong><small id="stockPlHint">Awaiting position</small></div>
+      </div>
+      <div class="scenario-section">
+        <h4>Premium at bid</h4>
+        <div class="scenario-metric accent-call"><span>Covered call</span><strong id="callPremium">—</strong><small id="callPremiumHint">Pick a call row</small></div>
+        <div class="scenario-metric accent-put"><span>Cash-secured put</span><strong id="putPremium">—</strong><small id="putPremiumHint">Pick a put row</small></div>
+      </div>
+      <div class="scenario-section">
+        <h4>Assignment outcomes</h4>
+        <div class="scenario-metric"><span>Called away stock P/L</span><strong id="calledAway">—</strong><small id="calledAwayHint">Excludes premium</small></div>
+        <div class="scenario-metric"><span>Put cash required</span><strong id="putCash">—</strong><small id="putCashHint">Pick a put row</small></div>
+        <div class="scenario-metric"><span>New stock basis if assigned</span><strong id="putBasis">—</strong><small id="putBasisHint">Weighted average basis</small></div>
+      </div>
+      <div class="risk-box"><span class="risk-icon">!</span><div><strong>Trade guard</strong><p>Orders use whole contracts, DAY limit orders and explicit position intent. Review every confirmation.</p></div></div>
+      <div class="connection-card"><div><span>Data source</span><strong id="dataSource">Alpaca</strong></div><div><span>Options level</span><strong id="optionsLevel">—</strong></div></div>
+    </aside>
+  </main>
+
+  <div class="toast-stack" id="toastStack"></div>
+  <div class="modal-backdrop hidden" id="orderModal">
+    <div class="modal"><button class="modal-x" id="modalClose">×</button><span class="eyebrow">ORDER REVIEW</span><h2 id="modalTitle">Confirm order</h2><div class="order-ticket" id="orderTicket"></div><p class="modal-warning">This submits a real order to the currently configured Alpaca account. Limit orders may not fill.</p><div class="modal-actions"><button class="action-btn neutral" id="cancelOrder">Cancel</button><button class="action-btn call" id="confirmOrder">Submit order</button></div></div>
+  </div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
