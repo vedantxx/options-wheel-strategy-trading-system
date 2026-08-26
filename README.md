@@ -25,8 +25,12 @@ Add these environment variables in **Vercel → Project Settings → Environment
 - `ALPACA_SECRET_KEY`
 - `ALPACA_PAPER=true`
 - `ALLOW_DEMO_FALLBACK=false` (recommended for production)
+- `TRADING_UNLOCK_PASSWORD` (required to enable Sell call / Sell put)
+- `FLASK_SECRET_KEY` (a long random value used to sign unlock sessions)
 
 Do not add `PORT`, `HOST`, or `FLASK_DEBUG` in Vercel. Git pushes to the connected production branch will deploy automatically, and pull requests will receive preview deployments.
+
+The site and market data load without a password. Sell call and Sell put remain disabled until `TRADING_UNLOCK_PASSWORD` is entered in the trading-lock dialog. Unlocks expire after 30 minutes by default; override this with `TRADING_UNLOCK_TTL_SECONDS`.
 
 ## Main flows
 

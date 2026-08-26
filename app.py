@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hmac
 import os
+import time
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, session
 
 from wheel_service import AlpacaError, WheelService, load_env
 
@@ -12,7 +14,32 @@ ROOT = Path(__file__).resolve().parent
 load_env(ROOT / ".env")
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Strict",
+    SESSION_COOKIE_SECURE=os.getenv("VERCEL") == "1",
+)
 service = WheelService()
+
+
+def _unlock_password() -> str:
+    return os.getenv("TRADING_UNLOCK_PASSWORD", "")
+
+
+def _unlock_ttl_seconds() -> int:
+    try:
+        return max(60, int(os.getenv("TRADING_UNLOCK_TTL_SECONDS", "1800")))
+    except ValueError:
+        return 1800
+
+
+def _sell_unlocked() -> bool:
+    expires_at = float(session.get("sell_unlocked_until", 0) or 0)
+    if expires_at <= time.time():
+        session.pop("sell_unlocked_until", None)
+        return False
+    return True
 
 
 @app.get("/")
@@ -50,9 +77,40 @@ def quote():
     return jsonify(service.quote(symbol))
 
 
+@app.get("/api/trading-lock")
+def trading_lock_status():
+    unlocked = _sell_unlocked()
+    return jsonify({
+        "configured": bool(_unlock_password()),
+        "unlocked": unlocked,
+        "expires_at": session.get("sell_unlocked_until") if unlocked else None,
+    })
+
+
+@app.post("/api/trading/unlock")
+def unlock_trading():
+    configured_password = _unlock_password()
+    supplied_password = str((request.get_json(silent=True) or {}).get("password", ""))
+    if not configured_password:
+        return jsonify({"error": "Set TRADING_UNLOCK_PASSWORD before unlocking sell orders."}), 503
+    if not hmac.compare_digest(supplied_password, configured_password):
+        return jsonify({"error": "Incorrect trading password."}), 401
+    expires_at = time.time() + _unlock_ttl_seconds()
+    session["sell_unlocked_until"] = expires_at
+    return jsonify({"configured": True, "unlocked": True, "expires_at": expires_at})
+
+
+@app.post("/api/trading/lock")
+def lock_trading():
+    session.pop("sell_unlocked_until", None)
+    return jsonify({"configured": bool(_unlock_password()), "unlocked": False, "expires_at": None})
+
+
 @app.post("/api/orders")
 def place_order():
     payload = request.get_json(silent=True) or {}
+    if payload.get("position_intent") == "sell_to_open" and not _sell_unlocked():
+        return jsonify({"error": "Selling is locked. Unlock it with your trading password first."}), 423
     try:
         return jsonify(service.place_order(payload)), 201
     except (AlpacaError, ValueError) as exc:
