@@ -12,6 +12,18 @@ def test_sell_orders_require_unlock(monkeypatch):
     locked_order = client.post("/api/orders", json={"position_intent": "sell_to_open"})
     assert locked_order.status_code == 423
 
+    locked_close_call = client.post("/api/orders", json={
+        "position_intent": "buy_to_close",
+        "symbol": "AAPL260918C00230000",
+    })
+    assert locked_close_call.status_code == 423
+
+    close_put = client.post("/api/orders", json={
+        "position_intent": "buy_to_close",
+        "symbol": "AAPL260918P00200000",
+    })
+    assert close_put.status_code != 423
+
 
 def test_password_unlocks_and_lock_endpoint_relocks(monkeypatch):
     monkeypatch.setenv("TRADING_UNLOCK_PASSWORD", "test-only-password")

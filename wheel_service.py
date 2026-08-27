@@ -5,6 +5,7 @@ import random
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import requests
@@ -14,6 +15,9 @@ from wheel_core import WheelScenario, number, option_mid, parse_option_symbol, s
 
 class AlpacaError(RuntimeError):
     pass
+
+
+OPEN_ORDER_STATUSES = {"new", "accepted", "pending_new", "partially_filled", "held", "accepted_for_bidding", "pending_replace", "pending_cancel"}
 
 
 def load_env(path: Path) -> None:
@@ -54,7 +58,7 @@ class AlpacaClient:
             except ValueError:
                 detail = response.text
             raise AlpacaError(f"Alpaca returned {response.status_code}: {detail}")
-        return response.json()
+        return response.json() if response.content else {}
 
     def trading(self, path: str, params: dict[str, Any] | None = None) -> Any:
         return self.request("GET", self.trading_base, path, params=params)
@@ -64,6 +68,9 @@ class AlpacaClient:
 
     def post(self, path: str, payload: dict[str, Any]) -> Any:
         return self.request("POST", self.trading_base, path, json=payload)
+
+    def delete(self, path: str) -> Any:
+        return self.request("DELETE", self.trading_base, path)
 
 
 class WheelService:
@@ -137,7 +144,9 @@ class WheelService:
         option_premium = sum(
             abs(number(leg.get("cost_basis"))) for position in positions for leg in position.get("short_legs", [])
         )
-        trades = [self._trade_row(order) for order in orders if order.get("symbol")][:20]
+        order_rows = [self._trade_row(order) for order in orders if order.get("symbol")]
+        trades = order_rows[:20]
+        pending_orders = [row for row in order_rows if row["status"] in OPEN_ORDER_STATUSES and row["option_type"]]
         return {
             "mode": mode,
             "paper": self.paper,
@@ -160,6 +169,7 @@ class WheelService:
             },
             "positions": positions,
             "trades": trades,
+            "pending_orders": pending_orders,
             "equity_curve": {
                 "labels": [datetime.fromtimestamp(ts, timezone.utc).strftime("%b %d") for ts in history.get("timestamp", [])],
                 "values": history.get("equity", []),
@@ -169,15 +179,21 @@ class WheelService:
     @staticmethod
     def _trade_row(order: dict[str, Any]) -> dict[str, Any]:
         parsed = parse_option_symbol(order.get("symbol", ""))
+        filled_qty = number(order.get("filled_qty"))
         return {
             "time": order.get("filled_at") or order.get("submitted_at") or "",
             "symbol": order.get("symbol", ""),
             "underlying": parsed["underlying"] if parsed else order.get("symbol", ""),
             "strategy": (parsed["type"].title() if parsed else "Stock") + (" · close" if order.get("position_intent") == "buy_to_close" else ""),
             "side": order.get("side", ""),
-            "qty": number(order.get("filled_qty"), number(order.get("qty"))),
+            "qty": filled_qty if filled_qty > 0 else number(order.get("qty")),
             "price": number(order.get("filled_avg_price"), number(order.get("limit_price"))),
             "status": order.get("status", ""),
+            "option_type": parsed["type"] if parsed else None,
+            "strike": parsed["strike"] if parsed else None,
+            "expiration": parsed["expiration"] if parsed else None,
+            "order_id": order.get("id"),
+            "cancelable": order.get("status", "") in OPEN_ORDER_STATUSES,
         }
 
     def maturities(self, symbol: str) -> dict[str, Any]:
@@ -224,7 +240,9 @@ class WheelService:
             "limit": 1000,
         })
         snapshots = chain_raw.get("snapshots", {})
-        return self._build_wheel_payload(position, expiration, snapshots, mode="live")
+        result = self._build_wheel_payload(position, expiration, snapshots, mode="live")
+        result["pending_orders"] = [order for order in portfolio.get("pending_orders", []) if order["underlying"] == symbol]
+        return result
 
     def _build_wheel_payload(self, position, expiration, snapshots, mode):
         spot = position["spot"]
@@ -288,6 +306,17 @@ class WheelService:
             "position_intent": intent,
         })
         return {"id": order.get("id"), "status": order.get("status"), "symbol": symbol, "paper": self.paper}
+
+    def cancel_order(self, order_id: str) -> dict[str, Any]:
+        try:
+            UUID(order_id)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("A valid Alpaca order ID is required.") from exc
+        order = self.client.trading(f"/v2/orders/{order_id}")
+        if order.get("status") not in OPEN_ORDER_STATUSES:
+            raise ValueError(f"This order can no longer be canceled because its status is {order.get('status', 'unknown')}.")
+        self.client.delete(f"/v2/orders/{order_id}")
+        return {"id": order_id, "symbol": order.get("symbol"), "status": "cancel_requested", "paper": self.paper}
 
     def _demo__portfolio_live(self) -> dict[str, Any]:
         positions = [

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, session
 
+from wheel_core import parse_option_symbol
 from wheel_service import AlpacaError, WheelService, load_env
 
 
@@ -40,6 +41,14 @@ def _sell_unlocked() -> bool:
         session.pop("sell_unlocked_until", None)
         return False
     return True
+
+
+def _requires_trading_unlock(payload: dict) -> bool:
+    intent = payload.get("position_intent")
+    if intent == "sell_to_open":
+        return True
+    contract = parse_option_symbol(str(payload.get("symbol", "")))
+    return intent == "buy_to_close" and bool(contract and contract["type"] == "call")
 
 
 @app.get("/")
@@ -109,10 +118,18 @@ def lock_trading():
 @app.post("/api/orders")
 def place_order():
     payload = request.get_json(silent=True) or {}
-    if payload.get("position_intent") == "sell_to_open" and not _sell_unlocked():
-        return jsonify({"error": "Selling is locked. Unlock it with your trading password first."}), 423
+    if _requires_trading_unlock(payload) and not _sell_unlocked():
+        return jsonify({"error": "Trading is locked. Unlock it with your trading password first."}), 423
     try:
         return jsonify(service.place_order(payload)), 201
+    except (AlpacaError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.delete("/api/orders/<order_id>")
+def cancel_order(order_id: str):
+    try:
+        return jsonify(service.cancel_order(order_id))
     except (AlpacaError, ValueError) as exc:
         return jsonify({"error": str(exc)}), 400
 

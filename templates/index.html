@@ -33,7 +33,6 @@
       <select id="maturitySelect"><option>Loading…</option></select>
     </div>
     <div class="divider"></div>
-    <button class="action-btn neutral" id="generateBtn"><span>⌁</span> Generate maturities</button>
     <button class="action-btn call" id="sellCallBtn" disabled><span>↗</span> Sell call @ mid</button>
     <button class="action-btn put" id="sellPutBtn" disabled><span>↘</span> Sell put @ mid</button>
     <button class="action-btn trade-lock" id="tradeLockBtn"><span>🔒</span> Unlock selling</button>
@@ -54,7 +53,7 @@
 
       <div class="charts-grid">
         <article class="panel chart-panel">
-          <div class="panel-head"><div><span class="eyebrow">SELECTED WHEEL</span><h3 id="wheelChartTitle">Position structure</h3></div><span class="legend-inline"><i class="cost-dot"></i> Cost basis <i class="scenario-line"></i> Dotted · scenario <i class="filled-line"></i> Solid · filled</span></div>
+          <div class="panel-head"><div><span class="eyebrow">SELECTED WHEEL</span><h3 id="wheelChartTitle">Position structure</h3></div><span class="legend-inline"><i class="cost-dot"></i> Cost basis <i class="scenario-line"></i> Dotted · scenario <i class="filled-line"></i> Solid · filled <i class="pending-line"></i> Gray · pending</span></div>
           <div class="chart-wrap"><canvas id="wheelChart"></canvas></div>
         </article>
         <article class="panel chart-panel">
@@ -78,7 +77,7 @@
 
       <article class="panel table-panel recent-trades-panel">
         <div class="panel-head"><div><span class="eyebrow">ACTIVITY</span><h3>Recent trades</h3></div><div class="search-box">⌕ <input id="tradeSearch" placeholder="Search trades"></div></div>
-        <div class="table-scroll"><table><thead><tr><th>Time</th><th>Underlying</th><th>Contract / strategy</th><th>Side</th><th>Qty</th><th>Fill / limit</th><th>Status</th></tr></thead><tbody id="tradesBody"><tr><td colspan="7" class="empty-cell">Loading trades…</td></tr></tbody></table></div>
+        <div class="table-scroll"><table><thead><tr><th>Time</th><th>Underlying</th><th>Contract / strategy</th><th>Side</th><th>Qty</th><th>Fill / limit</th><th>Status</th><th>Action</th></tr></thead><tbody id="tradesBody"><tr><td colspan="8" class="empty-cell">Loading trades…</td></tr></tbody></table></div>
       </article>
     </section>
 
@@ -109,10 +108,10 @@
 
   <div class="toast-stack" id="toastStack"></div>
   <div class="modal-backdrop hidden" id="orderModal">
-    <div class="modal"><button class="modal-x" id="modalClose">×</button><span class="eyebrow">ORDER REVIEW</span><h2 id="modalTitle">Confirm order</h2><div class="order-ticket" id="orderTicket"></div><p class="modal-warning">This submits a real order to the currently configured Alpaca account. Limit orders may not fill.</p><div class="modal-actions"><button class="action-btn neutral" id="cancelOrder">Cancel</button><button class="action-btn call" id="confirmOrder">Submit order</button></div></div>
+    <div class="modal"><button class="modal-x" id="modalClose">×</button><span class="eyebrow">ORDER REVIEW</span><h2 id="modalTitle">Confirm order</h2><div class="order-ticket" id="orderTicket"></div><p class="modal-warning" id="modalWarning">This submits a real order to the currently configured Alpaca account. Limit orders may not fill.</p><div class="modal-actions"><button class="action-btn neutral" id="cancelOrder">Cancel</button><button class="action-btn call" id="confirmOrder">Submit order</button></div></div>
   </div>
   <div class="modal-backdrop hidden" id="unlockModal">
-    <div class="modal unlock-modal"><button class="modal-x" id="unlockModalClose">×</button><span class="eyebrow">TRADING LOCK</span><h2>Unlock sell orders</h2><p class="unlock-copy" id="unlockCopy">Enter the trading password to enable Sell call and Sell put for this session.</p><label class="password-label" for="tradingPassword">Trading password</label><input class="password-input" id="tradingPassword" type="password" autocomplete="current-password" placeholder="Enter password"><div class="modal-actions"><button class="action-btn neutral" id="cancelUnlock">Cancel</button><button class="action-btn call" id="confirmUnlock">Unlock selling</button></div></div>
+    <div class="modal unlock-modal"><button class="modal-x" id="unlockModalClose">×</button><span class="eyebrow">TRADING LOCK</span><h2>Unlock trading actions</h2><p class="unlock-copy" id="unlockCopy">Enter the trading password to enable Sell call, Sell put, and Close call for this session.</p><label class="password-label" for="tradingPassword">Trading password</label><input class="password-input" id="tradingPassword" type="password" autocomplete="current-password" placeholder="Enter password"><div class="modal-actions"><button class="action-btn neutral" id="cancelUnlock">Cancel</button><button class="action-btn call" id="confirmUnlock">Unlock selling</button></div></div>
   </div>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
