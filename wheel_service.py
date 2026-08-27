@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ class AlpacaError(RuntimeError):
 
 
 OPEN_ORDER_STATUSES = {"new", "accepted", "pending_new", "partially_filled", "held", "accepted_for_bidding", "pending_replace", "pending_cancel"}
+STOCK_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.]{0,9}$")
 
 
 def load_env(path: Path) -> None:
@@ -79,6 +81,7 @@ class WheelService:
         self.paper = self.client.paper
         self.configured = self.client.configured
         self.allow_demo = os.getenv("ALLOW_DEMO_FALLBACK", "true").lower() not in {"0", "false", "no"}
+        self._last_cost_basis: dict[str, float] = {}
 
     def _fallback(self, fn, *args):
         try:
@@ -98,7 +101,7 @@ class WheelService:
         account = self.client.trading("/v2/account")
         clock = self.client.trading("/v2/clock")
         raw_positions = self.client.trading("/v2/positions")
-        orders = self.client.trading("/v2/orders", {"status": "all", "limit": 50, "direction": "desc", "nested": "true"})
+        orders = self.client.trading("/v2/orders", {"status": "all", "limit": 500, "direction": "desc", "nested": "true"})
         history = self.client.trading("/v2/account/portfolio/history", {"period": "1M", "timeframe": "1D"})
         stocks = [position for position in raw_positions if position.get("asset_class") == "us_equity"]
         option_positions = [position for position in raw_positions if position.get("asset_class") == "us_option"]
@@ -113,17 +116,21 @@ class WheelService:
             snap = snapshots.get(symbol, {})
             spot = number((snap.get("latestTrade") or {}).get("p"), number(position.get("current_price")))
             positions.append(self._stock_row(position, spot, option_positions))
-        return self._portfolio_payload(account, positions, orders, history, clock, mode="live")
+        return self._portfolio_payload(account, positions, orders, history, clock, mode="live", option_positions=option_positions)
 
-    def _stock_row(self, position: dict[str, Any], spot: float, options: list[dict[str, Any]]) -> dict[str, Any]:
-        symbol = position["symbol"]
-        shares = number(position.get("qty"))
-        avg = number(position.get("avg_entry_price"))
+    @staticmethod
+    def _short_legs(symbol: str, options: list[dict[str, Any]]) -> list[dict[str, Any]]:
         short_legs = []
         for option in options:
             parsed = parse_option_symbol(option.get("symbol", ""))
             if parsed and parsed["underlying"] == symbol and number(option.get("qty")) < 0:
                 short_legs.append({**parsed, **option})
+        return short_legs
+
+    def _stock_row(self, position: dict[str, Any], spot: float, options: list[dict[str, Any]]) -> dict[str, Any]:
+        symbol = position["symbol"]
+        shares = number(position.get("qty"))
+        avg = number(position.get("avg_entry_price"))
         return {
             "symbol": symbol,
             "shares": shares,
@@ -133,10 +140,37 @@ class WheelService:
             "cost_basis": number(position.get("cost_basis"), shares * avg),
             "unrealized_pl": number(position.get("unrealized_pl"), (spot - avg) * shares),
             "unrealized_plpc": number(position.get("unrealized_plpc")),
-            "short_legs": short_legs,
+            "short_legs": self._short_legs(symbol, options),
+            "held": True,
         }
 
-    def _portfolio_payload(self, account, positions, orders, history, clock, mode: str) -> dict[str, Any]:
+    @staticmethod
+    def _historical_stock_basis(orders: list[dict[str, Any]]) -> dict[str, float]:
+        ledgers: dict[str, dict[str, float]] = {}
+        dated_orders = sorted(
+            orders,
+            key=lambda order: order.get("filled_at") or order.get("submitted_at") or "",
+        )
+        for order in dated_orders:
+            symbol = str(order.get("symbol", "")).upper()
+            if parse_option_symbol(symbol) or not STOCK_SYMBOL_RE.fullmatch(symbol):
+                continue
+            qty = number(order.get("filled_qty"))
+            price = number(order.get("filled_avg_price"))
+            if qty <= 0 or price <= 0:
+                continue
+            ledger = ledgers.setdefault(symbol, {"qty": 0.0, "basis": 0.0, "last_basis": 0.0})
+            if order.get("side") == "buy":
+                new_qty = ledger["qty"] + qty
+                ledger["basis"] = ((ledger["qty"] * ledger["basis"]) + (qty * price)) / new_qty
+                ledger["qty"] = new_qty
+                ledger["last_basis"] = ledger["basis"]
+            elif order.get("side") == "sell" and ledger["qty"] > 0:
+                ledger["last_basis"] = ledger["basis"]
+                ledger["qty"] = max(0.0, ledger["qty"] - qty)
+        return {symbol: values["last_basis"] for symbol, values in ledgers.items() if values["last_basis"] > 0}
+
+    def _portfolio_payload(self, account, positions, orders, history, clock, mode: str, option_positions=None) -> dict[str, Any]:
         cash = number(account.get("cash"))
         equity = number(account.get("equity"))
         last_equity = number(account.get("last_equity"), equity)
@@ -144,9 +178,42 @@ class WheelService:
         option_premium = sum(
             abs(number(leg.get("cost_basis"))) for position in positions for leg in position.get("short_legs", [])
         )
-        order_rows = [self._trade_row(order) for order in orders if order.get("symbol")]
+        trade_orders = [order for order in orders if order.get("symbol")]
+        order_rows = [self._trade_row(order) for order in trade_orders]
         trades = order_rows[:20]
         pending_orders = [row for row in order_rows if row["status"] in OPEN_ORDER_STATUSES and row["option_type"]]
+        historical_basis = self._historical_stock_basis(orders)
+        for position in positions:
+            position["held"] = True
+            if position["average_cost"] > 0:
+                self._last_cost_basis[position["symbol"]] = position["average_cost"]
+        tracked_symbols = [position["symbol"] for position in positions]
+        for order, row in zip(trade_orders, order_rows):
+            meaningful = number(order.get("filled_qty")) > 0 or row["status"] in OPEN_ORDER_STATUSES
+            symbol = row["underlying"]
+            if meaningful and STOCK_SYMBOL_RE.fullmatch(symbol) and symbol not in tracked_symbols:
+                tracked_symbols.append(symbol)
+        positions_by_symbol = {position["symbol"]: position for position in positions}
+        wheel_profiles = []
+        for symbol in tracked_symbols:
+            if symbol in positions_by_symbol:
+                wheel_profiles.append(positions_by_symbol[symbol])
+                continue
+            last_basis = self._last_cost_basis.get(symbol) or historical_basis.get(symbol, 0.0)
+            if last_basis > 0:
+                self._last_cost_basis[symbol] = last_basis
+            wheel_profiles.append({
+                "symbol": symbol,
+                "shares": 0,
+                "average_cost": last_basis,
+                "spot": 0,
+                "market_value": 0,
+                "cost_basis": 0,
+                "unrealized_pl": 0,
+                "unrealized_plpc": 0,
+                "short_legs": self._short_legs(symbol, option_positions or []),
+                "held": False,
+            })
         return {
             "mode": mode,
             "paper": self.paper,
@@ -168,6 +235,8 @@ class WheelService:
                 "options_level": account.get("options_trading_level", 0),
             },
             "positions": positions,
+            "wheel_symbols": tracked_symbols,
+            "wheel_profiles": wheel_profiles,
             "trades": trades,
             "pending_orders": pending_orders,
             "equity_curve": {
@@ -231,9 +300,11 @@ class WheelService:
 
     def _wheel_live(self, symbol: str, expiration: str) -> dict[str, Any]:
         portfolio = self._portfolio_live()
-        position = next((p for p in portfolio["positions"] if p["symbol"] == symbol), None)
+        position = next((p for p in portfolio["wheel_profiles"] if p["symbol"] == symbol), None)
         if not position:
-            raise AlpacaError(f"No long stock position found for {symbol}.")
+            raise AlpacaError(f"No portfolio or wheel history found for {symbol}.")
+        if not position.get("held"):
+            position = {**position, "spot": self._quote_live(symbol)["price"]}
         chain_raw = self.client.data(f"/v1beta1/options/snapshots/{symbol}", {
             "feed": "indicative",
             "expiration_date": expiration,
@@ -351,7 +422,9 @@ class WheelService:
 
     def _demo__wheel_live(self, symbol: str, expiration: str) -> dict[str, Any]:
         portfolio = self._demo__portfolio_live()
-        position = next((p for p in portfolio["positions"] if p["symbol"] == symbol), portfolio["positions"][0])
+        position = next((p for p in portfolio["wheel_profiles"] if p["symbol"] == symbol), None)
+        if not position:
+            raise AlpacaError(f"No portfolio or wheel history found for {symbol}.")
         spot = position["spot"]
         rng = random.Random(f"{symbol}-{expiration}")
         snapshots = {}

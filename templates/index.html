@@ -53,7 +53,7 @@
 
       <div class="charts-grid">
         <article class="panel chart-panel">
-          <div class="panel-head"><div><span class="eyebrow">SELECTED WHEEL</span><h3 id="wheelChartTitle">Position structure</h3></div><span class="legend-inline"><i class="cost-dot"></i> Cost basis <i class="scenario-line"></i> Dotted · scenario <i class="filled-line"></i> Solid · filled <i class="pending-line"></i> Gray · pending</span></div>
+          <div class="panel-head"><div><span class="eyebrow">SELECTED WHEEL</span><h3 id="wheelChartTitle">Position structure</h3></div><span class="legend-inline"><i class="cost-dot"></i> <span id="costBasisLegend">Cost basis</span> <i class="scenario-line"></i> Dotted · scenario <i class="filled-line"></i> Solid · filled <i class="pending-line"></i> Gray · pending</span></div>
           <div class="chart-wrap"><canvas id="wheelChart"></canvas></div>
         </article>
         <article class="panel chart-panel">
@@ -84,11 +84,11 @@
     <aside class="sidebar">
       <div class="sidebar-head"><span class="eyebrow">SCENARIO ANALYSIS</span><h2 id="scenarioSymbol">— Wheel</h2><p>Assignment, premium and basis outcomes</p></div>
       <div class="position-card">
-        <div><span>Shares</span><strong id="positionShares">—</strong></div><div><span>Avg cost</span><strong id="positionCost">—</strong></div><div><span>Current</span><strong id="positionSpot">—</strong></div>
+        <div><span>Shares</span><strong id="positionShares">—</strong></div><div><span id="positionCostLabel">Avg cost</span><strong id="positionCost">—</strong></div><div><span>Current</span><strong id="positionSpot">—</strong></div>
       </div>
       <div class="scenario-section">
         <h4>Current position</h4>
-        <div class="scenario-metric hero"><span>Unrealized P/L from cost basis</span><strong id="stockPl">—</strong><small id="stockPlHint">Awaiting position</small></div>
+        <div class="scenario-metric hero"><span id="stockPlLabel">Unrealized P/L from cost basis</span><strong id="stockPl">—</strong><small id="stockPlHint">Awaiting position</small></div>
       </div>
       <div class="scenario-section">
         <h4>Premium at bid</h4>
