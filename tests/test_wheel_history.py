@@ -57,6 +57,35 @@ def test_empty_portfolio_and_empty_history_are_safe():
     assert payload["wheel_profiles"] == []
 
 
+def test_short_put_premium_counts_without_an_underlying_stock_position():
+    service = WheelService()
+    option_positions = [
+        {
+            "symbol": "NVDA260904P00215000",
+            "qty": "-1",
+            "cost_basis": "-146",
+        },
+        {
+            "symbol": "AAPL260904P00310000",
+            "qty": "-1",
+            "cost_basis": "-135",
+        },
+    ]
+
+    payload = service._portfolio_payload(
+        empty_account(),
+        [],
+        [],
+        empty_history(),
+        {"is_open": True},
+        "live",
+        option_positions=option_positions,
+    )
+
+    assert payload["positions"] == []
+    assert payload["account"]["premium_collected"] == 281
+
+
 def test_inactive_wheel_uses_live_quote_and_still_builds_put_chain(monkeypatch):
     service = WheelService()
     inactive = {

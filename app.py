@@ -47,8 +47,7 @@ def _requires_trading_unlock(payload: dict) -> bool:
     intent = payload.get("position_intent")
     if intent == "sell_to_open":
         return True
-    contract = parse_option_symbol(str(payload.get("symbol", "")))
-    return intent == "buy_to_close" and bool(contract and contract["type"] == "call")
+    return intent == "buy_to_close" and bool(parse_option_symbol(str(payload.get("symbol", ""))))
 
 
 @app.get("/")
@@ -128,6 +127,8 @@ def place_order():
 
 @app.delete("/api/orders/<order_id>")
 def cancel_order(order_id: str):
+    if not _sell_unlocked():
+        return jsonify({"error": "Trading is locked. Unlock it with your trading password before canceling an order."}), 423
     try:
         return jsonify(service.cancel_order(order_id))
     except (AlpacaError, ValueError) as exc:

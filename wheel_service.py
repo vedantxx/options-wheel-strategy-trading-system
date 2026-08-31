@@ -175,9 +175,16 @@ class WheelService:
         equity = number(account.get("equity"))
         last_equity = number(account.get("last_equity"), equity)
         total_pl = sum(p["unrealized_pl"] for p in positions)
-        option_premium = sum(
-            abs(number(leg.get("cost_basis"))) for position in positions for leg in position.get("short_legs", [])
-        )
+        if option_positions is not None:
+            option_premium = sum(
+                abs(number(option.get("cost_basis")))
+                for option in option_positions
+                if number(option.get("qty")) < 0 and parse_option_symbol(option.get("symbol", ""))
+            )
+        else:
+            option_premium = sum(
+                abs(number(leg.get("cost_basis"))) for position in positions for leg in position.get("short_legs", [])
+            )
         trade_orders = [order for order in orders if order.get("symbol")]
         order_rows = [self._trade_row(order) for order in trade_orders]
         trades = order_rows[:20]

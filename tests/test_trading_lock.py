@@ -22,7 +22,10 @@ def test_sell_orders_require_unlock(monkeypatch):
         "position_intent": "buy_to_close",
         "symbol": "AAPL260918P00200000",
     })
-    assert close_put.status_code != 423
+    assert close_put.status_code == 423
+
+    locked_cancel = client.delete("/api/orders/5f5dbf40-14ca-4f82-8948-1b5baa7289ac")
+    assert locked_cancel.status_code == 423
 
 
 def test_password_unlocks_and_lock_endpoint_relocks(monkeypatch):

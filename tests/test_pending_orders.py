@@ -59,12 +59,16 @@ def test_cancel_order_only_accepts_open_alpaca_order():
     assert service.client.deleted == "/v2/orders/5f5dbf40-14ca-4f82-8948-1b5baa7289ac"
 
 
-def test_cancel_endpoint_delegates_to_service(monkeypatch):
+def test_cancel_endpoint_delegates_to_service_after_unlock(monkeypatch):
     order_id = "5f5dbf40-14ca-4f82-8948-1b5baa7289ac"
+    monkeypatch.setenv("TRADING_UNLOCK_PASSWORD", "test-only-password")
     monkeypatch.setattr(app_module.service, "cancel_order", lambda value: {"id": value, "symbol": "AAPL260828C00315000", "status": "cancel_requested"})
+    client = app_module.app.test_client()
+    unlocked = client.post("/api/trading/unlock", json={"password": "test-only-password"})
 
-    response = app_module.app.test_client().delete(f"/api/orders/{order_id}")
+    response = client.delete(f"/api/orders/{order_id}")
 
+    assert unlocked.status_code == 200
     assert response.status_code == 200
     assert response.get_json()["status"] == "cancel_requested"
 
