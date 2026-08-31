@@ -135,3 +135,30 @@ def test_inactive_wheel_uses_live_quote_and_still_builds_put_chain(monkeypatch):
     assert result["position"]["spot"] == 210.25
     assert result["position"]["average_cost"] == 212.40
     assert result["puts"][0]["symbol"] == "NVDA260918P00205000"
+
+
+def test_option_bar_volume_is_added_to_both_chains():
+    service = WheelService()
+
+    class VolumeClient:
+        def data(self, path, params):
+            assert path == "/v1beta1/options/bars"
+            assert params["timeframe"] == "1Day"
+            assert "feed" not in params
+            return {
+                "bars": {
+                    "NVDA260918C00215000": [{"v": 1234}],
+                    "NVDA260918P00205000": [{"v": 567}],
+                }
+            }
+
+    service.client = VolumeClient()
+    result = {
+        "calls": [{"symbol": "NVDA260918C00215000"}],
+        "puts": [{"symbol": "NVDA260918P00205000"}],
+    }
+
+    service._add_option_volumes(result)
+
+    assert result["calls"][0]["volume"] == 1234
+    assert result["puts"][0]["volume"] == 567

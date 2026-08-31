@@ -319,8 +319,29 @@ class WheelService:
         })
         snapshots = chain_raw.get("snapshots", {})
         result = self._build_wheel_payload(position, expiration, snapshots, mode="live")
+        self._add_option_volumes(result)
         result["pending_orders"] = [order for order in portfolio.get("pending_orders", []) if order["underlying"] == symbol]
         return result
+
+    def _add_option_volumes(self, result: dict[str, Any]) -> None:
+        rows = result.get("calls", []) + result.get("puts", [])
+        symbols = [row["symbol"] for row in rows]
+        if not symbols:
+            return
+        try:
+            payload = self.client.data("/v1beta1/options/bars", {
+                "symbols": ",".join(symbols),
+                "timeframe": "1Day",
+                "start": date.today().isoformat(),
+                "limit": 1000,
+            })
+        except AlpacaError:
+            return
+        bars_by_symbol = payload.get("bars", {})
+        for row in rows:
+            bars = bars_by_symbol.get(row["symbol"], [])
+            latest = bars[-1] if isinstance(bars, list) and bars else bars if isinstance(bars, dict) else None
+            row["volume"] = int(number(latest.get("v"))) if latest else None
 
     def _build_wheel_payload(self, position, expiration, snapshots, mode):
         spot = position["spot"]
@@ -340,6 +361,7 @@ class WheelService:
                 "mid": option_mid(snapshot),
                 "delta": number(greeks.get("delta")),
                 "iv": number(snapshot.get("impliedVolatility")),
+                "volume": snapshot.get("volume"),
             })
         calls = self._select_chain(rows, spot, "call")
         puts = self._select_chain(rows, spot, "put")
@@ -449,7 +471,7 @@ class WheelService:
                 ask = mid + .04 + rng.random() * .05
                 delta_mag = max(.04, min(.96, .5 * __import__('math').exp(-(strike - spot) / 24))) if right == "C" else max(.04, min(.96, .5 * __import__('math').exp((strike - spot) / 24)))
                 occ = f"{root}{yymmdd}{right}{int(strike * 1000):08d}"
-                snapshots[occ] = {"latestQuote": {"bp": round(bid, 2), "ap": round(ask, 2)}, "greeks": {"delta": round(delta_mag if right == 'C' else -delta_mag, 4)}, "impliedVolatility": round(.28 + rng.random() * .14, 4)}
+                snapshots[occ] = {"latestQuote": {"bp": round(bid, 2), "ap": round(ask, 2)}, "greeks": {"delta": round(delta_mag if right == 'C' else -delta_mag, 4)}, "impliedVolatility": round(.28 + rng.random() * .14, 4), "volume": rng.randint(0, 5000)}
             strike += 2.5
         return self._build_wheel_payload(position, expiration, snapshots, "demo")
 
