@@ -14,7 +14,7 @@
   <header class="header">
     <div class="brand">
       <div class="brand-mark"><span></span><span></span><span></span></div>
-      <div><h1>Wheel <em>Command Center</em></h1><p>Portfolio control, contract selection &amp; scenario intelligence</p></div>
+      <div><div class="brand-title-row"><h1>Wheel <em>Command Center</em></h1><button class="action-btn trade-lock" id="tradeLockBtn"><span>🔒</span> Unlock selling</button></div><p>Portfolio control, contract selection &amp; scenario intelligence</p></div>
     </div>
     <div class="header-actions">
       <span class="market-pill" id="marketPill"><i></i><span id="marketStatus">Checking market</span></span>
@@ -33,11 +33,10 @@
       <select id="maturitySelect"><option>Loading…</option></select>
     </div>
     <div class="divider"></div>
-    <button class="action-btn call" id="sellCallBtn" disabled><span>↗</span> Sell call @ mid</button>
-    <button class="action-btn put" id="sellPutBtn" disabled><span>↘</span> Sell put @ mid</button>
-    <button class="action-btn trade-lock" id="tradeLockBtn"><span>🔒</span> Unlock selling</button>
     <button class="action-btn close" id="closeCallBtn" disabled>Close call</button>
     <button class="action-btn close" id="closePutBtn" disabled>Close put</button>
+    <button class="action-btn call" id="sellCallBtn" disabled><span>↗</span> Sell call @ mid</button>
+    <button class="action-btn put" id="sellPutBtn" disabled><span>↘</span> Sell put @ mid</button>
     <div class="control-spacer"></div>
     <div class="selection-note" id="selectionNote">Select an option row to prepare a trade</div>
   </section>
