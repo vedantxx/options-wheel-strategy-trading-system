@@ -132,7 +132,6 @@ function renderChain(type, rows) {
 function selectOption(type,symbol,row) {
   const item=state.wheel[`${type}s`].find(r=>r.symbol===symbol); state[type==='call'?'selectedCall':'selectedPut']=item;
   [...row.parentElement.children].forEach(r=>r.classList.remove('selected'));row.classList.add('selected');updateScenario();renderWheelChart();syncButtons();
-  $('selectionNote').textContent=`${type.toUpperCase()} ${money(item.strike,2)} · mid ${money(item.mid,2)}`;
 }
 
 function scenario() {
