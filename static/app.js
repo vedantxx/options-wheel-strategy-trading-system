@@ -68,8 +68,11 @@ function renderTrades(trades) {
   const rows = trades.filter(t => Object.values(t).join(' ').toLowerCase().includes(q));
   $('tradesBody').innerHTML = rows.length ? rows.map(t => {
     const eventClass = String(t.event || '').toLowerCase().replace(/[^a-z]+/g, '-');
-    return `<tr><td>${t.time?new Date(t.time).toLocaleDateString():'—'}</td><td><strong>${t.underlying}</strong></td><td><span class="mono">${t.symbol}</span><br><span style="color:var(--muted)">${t.strategy}</span></td><td>${t.side}</td><td class="mono">${num(t.qty,0)}</td><td class="mono">${money(t.price,2)}</td><td><span class="status ${t.status}">${t.status}</span></td><td>${t.event?`<span class="lifecycle ${eventClass}">${t.event}</span>`:'—'}</td><td class="mono">${shortDate(t.event_date)}</td><td class="mono ${cls(t.pnl)}">${money(t.pnl,2)}</td><td class="mono ${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td>${t.cancelable&&t.order_id?`<button class="cancel-order-btn" data-order-id="${t.order_id}" data-symbol="${t.symbol}" ${state.tradingLock.unlocked?'':'disabled'}>${state.tradingLock.unlocked?'Cancel order':'🔒 Cancel order'}</button>`:'—'}</td></tr>`;
-  }).join('') : '<tr><td colspan="12" class="empty-cell">No matching trades</td></tr>';
+    const statusClass = String(t.status || '').toLowerCase().replace(/[^a-z]+/g, '-');
+    const brokerStatus = t.status && t.status !== 'filled' ? String(t.status).replaceAll('_',' ').replace(/\b\w/g, c => c.toUpperCase()) : '';
+    const assignment = [t.event, brokerStatus].filter(Boolean).join(' · ');
+    return `<tr><td>${t.time?new Date(t.time).toLocaleDateString():'—'}</td><td><strong>${t.underlying}</strong></td><td><span class="mono">${t.symbol}</span><br><span style="color:var(--muted)">${t.strategy}</span></td><td>${t.side}</td><td class="mono">${num(t.qty,0)}</td><td class="mono">${money(t.price,2)}</td><td>${assignment?`<span class="lifecycle ${eventClass} ${statusClass}">${assignment}</span>`:'—'}</td><td class="mono">${shortDate(t.event_date)}</td><td class="mono ${cls(t.pnl)}">${money(t.pnl,2)}</td><td class="mono ${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td><td>${t.cancelable&&t.order_id?`<button class="cancel-order-btn" data-order-id="${t.order_id}" data-symbol="${t.symbol}" ${state.tradingLock.unlocked?'':'disabled'}>${state.tradingLock.unlocked?'Cancel order':'🔒 Cancel order'}</button>`:'—'}</td></tr>`;
+  }).join('') : '<tr><td colspan="11" class="empty-cell">No matching trades</td></tr>';
   [...$('tradesBody').querySelectorAll('.cancel-order-btn')].forEach(button=>button.onclick=()=>openCancelOrder(button.dataset.orderId,button.dataset.symbol));
 }
 
