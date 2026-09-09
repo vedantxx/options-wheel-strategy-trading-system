@@ -102,6 +102,14 @@ class WheelService:
         clock = self.client.trading("/v2/clock")
         raw_positions = self.client.trading("/v2/positions")
         orders = self.client.trading("/v2/orders", {"status": "all", "limit": 500, "direction": "desc", "nested": "true"})
+        try:
+            activities = self.client.trading("/v2/account/activities", {
+                "activity_types": "OPASN,OPEXP,OPTRD",
+                "direction": "desc",
+                "page_size": 100,
+            })
+        except AlpacaError:
+            activities = []
         history = self.client.trading("/v2/account/portfolio/history", {"period": "1M", "timeframe": "1D"})
         stocks = [position for position in raw_positions if position.get("asset_class") == "us_equity"]
         option_positions = [position for position in raw_positions if position.get("asset_class") == "us_option"]
@@ -116,7 +124,10 @@ class WheelService:
             snap = snapshots.get(symbol, {})
             spot = number((snap.get("latestTrade") or {}).get("p"), number(position.get("current_price")))
             positions.append(self._stock_row(position, spot, option_positions))
-        return self._portfolio_payload(account, positions, orders, history, clock, mode="live", option_positions=option_positions)
+        return self._portfolio_payload(
+            account, positions, orders, history, clock, mode="live",
+            option_positions=option_positions, activities=activities,
+        )
 
     @staticmethod
     def _short_legs(symbol: str, options: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -170,7 +181,10 @@ class WheelService:
                 ledger["qty"] = max(0.0, ledger["qty"] - qty)
         return {symbol: values["last_basis"] for symbol, values in ledgers.items() if values["last_basis"] > 0}
 
-    def _portfolio_payload(self, account, positions, orders, history, clock, mode: str, option_positions=None) -> dict[str, Any]:
+    def _portfolio_payload(
+        self, account, positions, orders, history, clock, mode: str,
+        option_positions=None, activities=None,
+    ) -> dict[str, Any]:
         cash = number(account.get("cash"))
         equity = number(account.get("equity"))
         last_equity = number(account.get("last_equity"), equity)
@@ -187,6 +201,9 @@ class WheelService:
             )
         trade_orders = [order for order in orders if order.get("symbol")]
         order_rows = [self._trade_row(order) for order in trade_orders]
+        self._add_trade_lifecycle(
+            order_rows, trade_orders, positions, option_positions or [], activities or []
+        )
         trades = order_rows[:20]
         pending_orders = [row for row in order_rows if row["status"] in OPEN_ORDER_STATUSES and row["option_type"]]
         historical_basis = self._historical_stock_basis(orders)
@@ -270,7 +287,202 @@ class WheelService:
             "expiration": parsed["expiration"] if parsed else None,
             "order_id": order.get("id"),
             "cancelable": order.get("status", "") in OPEN_ORDER_STATUSES,
+            "position_intent": order.get("position_intent", ""),
+            "event": None,
+            "event_date": None,
+            "pnl": None,
+            "pnl_pct": None,
         }
+
+    @staticmethod
+    def _date_part(value: Any) -> str | None:
+        text = str(value or "")
+        return text[:10] if len(text) >= 10 else None
+
+    @classmethod
+    def _add_trade_lifecycle(
+        cls,
+        rows: list[dict[str, Any]],
+        orders: list[dict[str, Any]],
+        stock_positions: list[dict[str, Any]],
+        option_positions: list[dict[str, Any]],
+        activities: list[dict[str, Any]],
+    ) -> None:
+        stock_by_symbol = {position["symbol"]: position for position in stock_positions}
+        option_by_symbol = {
+            position.get("symbol", ""): position
+            for position in option_positions
+            if number(position.get("qty")) != 0
+        }
+        option_events: dict[str, list[dict[str, Any]]] = {}
+        for activity in activities:
+            if activity.get("activity_type") in {"OPASN", "OPEXP"}:
+                option_events.setdefault(activity.get("symbol", ""), []).append(activity)
+        stock_assignment_closes: dict[str, list[dict[str, Any]]] = {}
+        for activity in activities:
+            symbol = str(activity.get("symbol", "")).upper()
+            if (
+                activity.get("activity_type") == "OPTRD"
+                and STOCK_SYMBOL_RE.fullmatch(symbol)
+                and number(activity.get("qty")) < 0
+            ):
+                stock_assignment_closes.setdefault(symbol, []).append(activity)
+
+        paired = list(zip(rows, orders))
+        for row, order in paired:
+            if row["option_type"]:
+                cls._add_option_trade_lifecycle(row, order, paired, option_by_symbol, option_events)
+            else:
+                cls._add_stock_trade_lifecycle(row, order, paired, stock_by_symbol, stock_assignment_closes)
+
+    @classmethod
+    def _add_option_trade_lifecycle(
+        cls, row, order, paired, option_by_symbol, option_events
+    ) -> None:
+        symbol = row["symbol"]
+        qty = number(order.get("filled_qty"))
+        entry = number(order.get("filled_avg_price"))
+        intent = order.get("position_intent")
+        opened_at = order.get("filled_at") or order.get("submitted_at") or ""
+
+        closings = [
+            (candidate_row, candidate_order)
+            for candidate_row, candidate_order in paired
+            if candidate_row["symbol"] == symbol
+            and candidate_order.get("position_intent") == "buy_to_close"
+            and number(candidate_order.get("filled_qty")) > 0
+            and (candidate_order.get("filled_at") or "") > opened_at
+        ]
+        closing = min(
+            closings,
+            key=lambda pair: pair[1].get("filled_at") or "",
+            default=None,
+        )
+        opened_date = cls._date_part(opened_at) or ""
+        matching_events = [
+            candidate
+            for candidate in option_events.get(symbol, [])
+            if (candidate.get("date") or "") >= opened_date
+        ]
+        event = min(matching_events, key=lambda candidate: candidate.get("date") or "", default=None)
+        live_position = option_by_symbol.get(symbol)
+
+        if intent == "buy_to_close":
+            row["event"] = "No"
+            row["event_date"] = cls._date_part(order.get("filled_at"))
+            openings = [
+                candidate_order
+                for candidate_row, candidate_order in paired
+                if candidate_row["symbol"] == symbol
+                and candidate_order.get("position_intent") == "sell_to_open"
+                and number(candidate_order.get("filled_qty")) > 0
+                and (candidate_order.get("filled_at") or "") < opened_at
+            ]
+            opening = max(openings, key=lambda candidate: candidate.get("filled_at") or "", default=None)
+            if opening:
+                credit = number(opening.get("filled_avg_price"))
+                contracts = min(qty, number(opening.get("filled_qty")))
+                row["pnl"] = round((credit - entry) * 100 * contracts, 2)
+                basis = credit * 100 * contracts
+                row["pnl_pct"] = round(row["pnl"] / basis, 6) if basis else None
+            return
+
+        if event and event.get("activity_type") == "OPASN":
+            row["event"] = "Yes"
+            row["event_date"] = cls._date_part(event.get("date"))
+            if qty > 0 and entry > 0:
+                row["pnl"] = round(entry * 100 * qty, 2)
+                row["pnl_pct"] = 1.0
+        elif event and event.get("activity_type") == "OPEXP":
+            row["event"] = "Expired"
+            row["event_date"] = cls._date_part(event.get("date"))
+            if qty > 0 and entry > 0:
+                row["pnl"] = round(entry * 100 * qty, 2)
+                row["pnl_pct"] = 1.0
+        elif closing:
+            closing_row, closing_order = closing
+            close_price = number(closing_order.get("filled_avg_price"))
+            contracts = min(qty, number(closing_order.get("filled_qty")))
+            row["event"] = "No"
+            row["event_date"] = cls._date_part(closing_order.get("filled_at"))
+            if contracts > 0 and entry > 0 and close_price > 0:
+                row["pnl"] = round((entry - close_price) * 100 * contracts, 2)
+                basis = entry * 100 * contracts
+                row["pnl_pct"] = round(row["pnl"] / basis, 6) if basis else None
+        elif live_position:
+            row["event"] = "Live"
+            total_qty = abs(number(live_position.get("qty")))
+            share = min(1.0, qty / total_qty) if qty > 0 and total_qty > 0 else 1.0
+            row["pnl"] = round(number(live_position.get("unrealized_pl")) * share, 2)
+            row["pnl_pct"] = number(live_position.get("unrealized_plpc"))
+        elif row["status"] in OPEN_ORDER_STATUSES:
+            row["event"] = "Live"
+        elif qty <= 0:
+            row["event"] = "No"
+            row["event_date"] = cls._date_part(
+                order.get("canceled_at") or order.get("expired_at") or order.get("failed_at")
+            )
+        elif row.get("expiration") and row["expiration"] < date.today().isoformat():
+            row["event"] = "Expired"
+            row["event_date"] = row["expiration"]
+            row["pnl"] = round(entry * 100 * qty, 2)
+            row["pnl_pct"] = 1.0
+        else:
+            row["event"] = "Live"
+
+    @classmethod
+    def _add_stock_trade_lifecycle(
+        cls, row, order, paired, stock_by_symbol, stock_assignment_closes
+    ) -> None:
+        symbol = row["symbol"]
+        qty = number(order.get("filled_qty"))
+        entry = number(order.get("filled_avg_price"))
+        opened_at = order.get("filled_at") or order.get("submitted_at") or ""
+        position = stock_by_symbol.get(symbol)
+
+        market_closes = [
+            candidate_order
+            for candidate_row, candidate_order in paired
+            if candidate_row["symbol"] == symbol
+            and candidate_order.get("side") == "sell"
+            and number(candidate_order.get("filled_qty")) > 0
+            and (candidate_order.get("filled_at") or "") > opened_at
+        ]
+        market_close = min(
+            market_closes,
+            key=lambda candidate: candidate.get("filled_at") or "",
+            default=None,
+        )
+        assignment_closes = [
+            activity
+            for activity in stock_assignment_closes.get(symbol, [])
+            if (activity.get("date") or "") >= (cls._date_part(opened_at) or "")
+        ]
+        assignment_close = min(
+            assignment_closes,
+            key=lambda activity: activity.get("date") or "",
+            default=None,
+        )
+        if order.get("side") == "buy" and not market_close and not assignment_close and position:
+            row["event"] = "Open"
+            if qty > 0 and entry > 0:
+                row["pnl"] = round((number(position.get("spot")) - entry) * qty, 2)
+                row["pnl_pct"] = round(row["pnl"] / (entry * qty), 6)
+            return
+
+        close_price = number(
+            market_close.get("filled_avg_price") if market_close else assignment_close.get("price") if assignment_close else 0
+        )
+        close_date = cls._date_part(
+            market_close.get("filled_at") if market_close else assignment_close.get("date") if assignment_close else None
+        )
+        row["event"] = "Open" if order.get("side") == "buy" and position else "Closed"
+        row["event_date"] = close_date or cls._date_part(
+            order.get("filled_at") if order.get("side") == "sell" else order.get("canceled_at")
+        )
+        if order.get("side") == "buy" and qty > 0 and entry > 0 and close_price > 0:
+            row["pnl"] = round((close_price - entry) * qty, 2)
+            row["pnl_pct"] = round(row["pnl"] / (entry * qty), 6)
 
     def maturities(self, symbol: str) -> dict[str, Any]:
         return self._fallback(self._maturities_live, symbol)
