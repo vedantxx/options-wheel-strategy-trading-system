@@ -1,3 +1,5 @@
+from datetime import date
+
 from wheel_service import WheelService
 
 
@@ -145,10 +147,11 @@ def test_option_bar_volume_is_added_to_both_chains():
             assert path == "/v1beta1/options/bars"
             assert params["timeframe"] == "1Day"
             assert "feed" not in params
+            assert params["start"] < date.today().isoformat()
             return {
                 "bars": {
-                    "NVDA260918C00215000": [{"v": 1234}],
-                    "NVDA260918P00205000": [{"v": 567}],
+                    "NVDA260918C00215000": [{"v": 1000}, {"v": 1234}],
+                    "NVDA260918P00205000": [{"v": 500}, {"v": 567}],
                 }
             }
 

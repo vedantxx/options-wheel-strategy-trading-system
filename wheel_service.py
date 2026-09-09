@@ -332,7 +332,7 @@ class WheelService:
             payload = self.client.data("/v1beta1/options/bars", {
                 "symbols": ",".join(symbols),
                 "timeframe": "1Day",
-                "start": date.today().isoformat(),
+                "start": (date.today() - timedelta(days=7)).isoformat(),
                 "limit": 1000,
             })
         except AlpacaError:
