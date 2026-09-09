@@ -100,7 +100,7 @@ async function loadWheel() {
 }
 
 function renderWheel(data) {
-  const p=data.position,held=p.held!==false&&Number(p.shares)>0,basisLabel=held?'Cost basis':'Last cost basis'; $('scenarioSymbol').textContent=`${p.symbol} Wheel`; $('wheelChartTitle').textContent=held?`${p.symbol} · ${num(p.shares,0)} shares @ ${money(p.average_cost,2)}`:`${p.symbol} · put phase · ${basisLabel.toLowerCase()} ${money(p.average_cost,2)}`;
+  const p=data.position,held=p.held!==false&&Number(p.shares)>0,basisLabel=held?'Cost basis':'Last cost basis',phase=$('wheelPhase'); $('scenarioSymbol').textContent=`${p.symbol} Wheel`; $('wheelChartTitle').textContent=held?`${p.symbol} · ${num(p.shares,0)} shares @ ${money(p.average_cost,2)}`:`${p.symbol} · ${basisLabel.toLowerCase()} ${money(p.average_cost,2)}`;phase.textContent=held?'↗ CALL':'↘ PUT';phase.className=`phase-pill ${held?'call':'put'}`;
   $('positionCostLabel').textContent=held?'Avg cost':'↤ Cost basis';$('costBasisLegend').textContent=basisLabel;
   $('positionShares').textContent=num(p.shares,0);$('positionCost').textContent=money(p.average_cost,2);$('positionSpot').textContent=money(p.spot,2);
   renderChain('call',data.calls);renderChain('put',data.puts);renderWheelChart();updateScenario();syncButtons();
