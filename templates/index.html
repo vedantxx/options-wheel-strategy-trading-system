@@ -14,12 +14,12 @@
   <header class="header">
     <div class="brand">
       <div class="brand-mark"><span></span><span></span><span></span></div>
-      <div><div class="brand-title-row"><h1>Wheel <em>Command Center</em></h1><button class="action-btn trade-lock" id="tradeLockBtn"><span>🔒</span> Unlock selling</button></div><p>Portfolio control, contract selection &amp; scenario intelligence</p></div>
+      <div><h1>Wheel <em>Command Center</em></h1><p>Portfolio control, contract selection &amp; scenario intelligence</p></div>
     </div>
     <div class="header-actions">
       <span class="market-pill" id="marketPill"><i></i><span id="marketStatus">Checking market</span></span>
       <span class="env-pill">{{ 'PAPER' if paper else 'LIVE' }}</span>
-      <button class="icon-btn" id="refreshBtn" aria-label="Refresh dashboard" title="Refresh dashboard">↻</button>
+      <button class="icon-btn trade-lock" id="tradeLockBtn" aria-label="Unlock selling" title="Password required to unlock trading">🔒</button>
     </div>
   </header>
 
@@ -39,6 +39,7 @@
     <button class="action-btn put" id="sellPutBtn" disabled><span>↘</span> Sell put @ mid</button>
     <div class="control-spacer"></div>
     <div class="selection-note timestamp" id="updatedAt">Updated —</div>
+    <button class="icon-btn" id="refreshBtn" aria-label="Refresh dashboard" title="Refresh dashboard">↻</button>
   </section>
 
   <div class="mode-banner hidden" id="modeBanner"></div>
