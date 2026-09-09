@@ -19,7 +19,7 @@
     <div class="header-actions">
       <span class="market-pill" id="marketPill"><i></i><span id="marketStatus">Checking market</span></span>
       <span class="env-pill">{{ 'PAPER' if paper else 'LIVE' }}</span>
-      <button class="icon-btn trade-lock" id="tradeLockBtn" aria-label="Unlock selling" title="Password required to unlock trading" data-lock-icon="{{ url_for('static', filename='images/lock.png') }}" data-unlock-icon="{{ url_for('static', filename='images/unlock.png') }}"><img src="{{ url_for('static', filename='images/unlock.png') }}" alt="" aria-hidden="true"></button>
+      <button class="icon-btn trade-lock" id="tradeLockBtn" aria-label="Trading locked; click to unlock selling" title="Password required to unlock trading" data-lock-icon="{{ url_for('static', filename='images/lock.png') }}" data-unlock-icon="{{ url_for('static', filename='images/unlock.png') }}"><img src="{{ url_for('static', filename='images/lock.png') }}" alt="" aria-hidden="true"></button>
     </div>
   </header>
 
