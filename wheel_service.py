@@ -204,7 +204,12 @@ class WheelService:
         self._add_trade_lifecycle(
             order_rows, trade_orders, positions, option_positions or [], activities or []
         )
-        trades = order_rows[:20]
+        activity_rows = self._assignment_stock_rows(activities or [], positions)
+        trades = sorted(
+            order_rows + activity_rows,
+            key=lambda row: row.get("time") or "",
+            reverse=True,
+        )[:20]
         pending_orders = [row for row in order_rows if row["status"] in OPEN_ORDER_STATUSES and row["option_type"]]
         historical_basis = self._historical_stock_basis(orders)
         for position in positions:
@@ -298,6 +303,72 @@ class WheelService:
     def _date_part(value: Any) -> str | None:
         text = str(value or "")
         return text[:10] if len(text) >= 10 else None
+
+    @classmethod
+    def _assignment_stock_rows(
+        cls,
+        activities: list[dict[str, Any]],
+        stock_positions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        positions = {position["symbol"]: position for position in stock_positions}
+        closes: dict[str, list[dict[str, Any]]] = {}
+        for activity in activities:
+            symbol = str(activity.get("symbol", "")).upper()
+            if activity.get("activity_type") == "OPTRD" and number(activity.get("qty")) < 0:
+                closes.setdefault(symbol, []).append(activity)
+        rows = []
+        for activity in activities:
+            symbol = str(activity.get("symbol", "")).upper()
+            qty = number(activity.get("qty"))
+            if (
+                activity.get("activity_type") != "OPTRD"
+                or qty <= 0
+                or not STOCK_SYMBOL_RE.fullmatch(symbol)
+            ):
+                continue
+            position = positions.get(symbol)
+            assigned_date = cls._date_part(activity.get("date")) or ""
+            later_closes = [
+                close for close in closes.get(symbol, [])
+                if (cls._date_part(close.get("date")) or "") > assigned_date
+            ]
+            close = min(
+                later_closes,
+                key=lambda candidate: cls._date_part(candidate.get("date")) or "",
+                default=None,
+            )
+            held_qty = abs(number(position.get("shares"))) if position else 0
+            allocation = min(1.0, qty / held_qty) if held_qty > 0 else 0
+            entry = number(activity.get("price"))
+            close_price = number(close.get("price")) if close else 0
+            is_open = close is None and position is not None
+            if close and entry > 0 and close_price > 0:
+                pnl = round((close_price - entry) * qty, 2)
+                pnl_pct = round(pnl / (entry * qty), 6)
+            else:
+                pnl = round(number(position.get("unrealized_pl")) * allocation, 2) if is_open else None
+                pnl_pct = number(position.get("unrealized_plpc")) if is_open else None
+            rows.append({
+                "time": activity.get("date") or "",
+                "symbol": symbol,
+                "underlying": symbol,
+                "strategy": "Stock · put assignment",
+                "side": "buy",
+                "qty": qty,
+                "price": entry,
+                "status": "filled",
+                "option_type": None,
+                "strike": None,
+                "expiration": None,
+                "order_id": None,
+                "cancelable": False,
+                "position_intent": "assignment",
+                "event": "Open" if is_open else "Closed",
+                "event_date": cls._date_part(close.get("date")) if close else assigned_date,
+                "pnl": pnl,
+                "pnl_pct": pnl_pct,
+            })
+        return rows
 
     @classmethod
     def _add_trade_lifecycle(
@@ -476,7 +547,7 @@ class WheelService:
         close_date = cls._date_part(
             market_close.get("filled_at") if market_close else assignment_close.get("date") if assignment_close else None
         )
-        row["event"] = "Open" if order.get("side") == "buy" and position else "Closed"
+        row["event"] = "Closed"
         row["event_date"] = close_date or cls._date_part(
             order.get("filled_at") if order.get("side") == "sell" else order.get("canceled_at")
         )

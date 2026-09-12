@@ -106,3 +106,51 @@ def test_open_positions_show_live_state_and_unrealized_pnl():
     assert (option["event"], option["event_date"], option["pnl"], option["pnl_pct"]) == (
         "Live", None, 75.0, 0.375
     )
+
+
+def test_put_assignment_adds_stock_purchase_and_keeps_prior_lot_closed():
+    service = WheelService()
+    stock_positions = [{
+        "symbol": "NVDA", "shares": 100, "average_cost": 218.81, "spot": 218.29,
+        "market_value": 21829, "cost_basis": 21881, "unrealized_pl": -52,
+        "unrealized_plpc": -0.00238, "short_legs": [], "held": True,
+    }]
+    orders = [
+        {
+            "symbol": "NVDA260911P00220000", "side": "sell", "qty": "1", "filled_qty": "1",
+            "filled_avg_price": "1.19", "status": "filled", "position_intent": "sell_to_open",
+            "filled_at": "2026-09-09T14:05:35Z",
+        },
+        {
+            "symbol": "NVDA", "side": "buy", "qty": "100", "filled_qty": "100",
+            "filled_avg_price": "212.4002", "status": "filled", "position_intent": "buy_to_open",
+            "filled_at": "2026-08-25T19:51:38Z",
+        },
+    ]
+    activities = [
+        {"activity_type": "OPASN", "symbol": "NVDA260911P00220000", "qty": "1", "date": "2026-09-11"},
+        {"activity_type": "OPTRD", "symbol": "NVDA", "qty": "100", "price": "220", "date": "2026-09-11"},
+        {"activity_type": "OPTRD", "symbol": "NVDA", "qty": "-100", "price": "217.5", "date": "2026-08-28"},
+    ]
+
+    payload = service._portfolio_payload(
+        account(), stock_positions, orders, empty_history(), {"is_open": False}, "live",
+        activities=activities,
+    )
+
+    assigned_stock = next(row for row in payload["trades"] if row["position_intent"] == "assignment")
+    assert assigned_stock["strategy"] == "Stock · put assignment"
+    assert assigned_stock["side"] == "buy"
+    assert assigned_stock["qty"] == 100
+    assert assigned_stock["price"] == 220
+    assert assigned_stock["event"] == "Open"
+    assert assigned_stock["event_date"] == "2026-09-11"
+    assert assigned_stock["pnl"] == -52
+    assert assigned_stock["pnl_pct"] == -0.00238
+
+    prior_stock = next(
+        row for row in payload["trades"]
+        if row["symbol"] == "NVDA" and row["position_intent"] == "buy_to_open"
+    )
+    assert prior_stock["event"] == "Closed"
+    assert prior_stock["event_date"] == "2026-08-28"
